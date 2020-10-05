@@ -7,97 +7,87 @@ using namespace std;
 const int MAX_LEAF_SIZE = 8;
 
 template<typename T>
-spatial::Quadtree<T>::Quadtree(double x0, double x1, double y0, double y1) {
-    height = 1;
-    load = 0;
-    bounds = (spatial::Rectangle){x0, x1, y0, y1};
-    xmedian = (bounds.xmin + bounds.xmax) / 2;
-    ymedian = (bounds.ymin + bounds.ymax) / 2;
-    try { 
-        data = new spatial::Datum<T>[MAX_LEAF_SIZE];
-    } catch (...) {
-        cout << "Exception thrown while allocating a new datum\n";
-        exit(0);
+spatial::Quadtree<T>::Quadtree(double x0, double x1, double y0, double y1):
+    root(new Node(NULL, 0, 0, (Rectangle){x0, x1, y0, y1})) {}
+
+template<typename T>
+spatial::Quadtree<T>::Node::Node(Node* p, int d, long long int c, Rectangle b): 
+    parent(p), depth(d), code(c), bounds(b), center(midpoint(b)) {}
+
+template<typename T>
+spatial::Range spatial::Quadtree<T>::build(vector<T> raw_data) {
+    vector<Datum<T>> formatted_data;
+    for (int i=0; i<(int)raw_data.size(); i++) {
+        Point new_point = {raw_data[i][0], raw_data[i][1]};
+        Datum<T> new_datum = {raw_data[i], new_point};
+        formatted_data.push_back(new_datum);
     }
-    NW = NE = SW = SE = NULL;
+    return recursive_build(root, formatted_data); 
 }
 
 template<typename T>
-int spatial::Quadtree<T>::insert(T data) {
-    struct spatial::Point new_point = (spatial::Point){data[0], data[1]};
-    struct spatial::Datum<T> new_datum = (spatial::Datum<T>){data, new_point};
-    return insert(new_datum);
-}
-
-template<typename T>
-int spatial::Quadtree<T>::insert(spatial::Datum<T> datum) {
-    if (isLeaf()) {
-        this->data[load] = datum;
-        load++;
-        if (getLoad() >= MAX_LEAF_SIZE) height = split_node();
-    } else { 
-        int subtree_height = recursive_insert(datum);
-        if (subtree_height >= height) height = 1 + subtree_height;
-        load++;
-    }
-    return height;
-}
-
-template<typename T>
-int spatial::Quadtree<T>::recursive_insert(spatial::Datum<T> datum) {
-    double x = datum.point.x;
-    double y = datum.point.y;
-    int subtree_height;
-
-    // Determine which quadrant to recurse on
-    if (x < xmedian) { 
-        if (y < ymedian) {
-            subtree_height = SW->insert(datum);
-        } else {
-            subtree_height = NW->insert(datum);
-        }
+spatial::Range spatial::Quadtree<T>::recursive_build(
+        Node* node, vector<Datum<T>> data) {
+    if (data.size() <= MAX_LEAF_SIZE) {
+        // Create a new leaf node
+        int index = leaves.size();
+        node->leaf_range = {index, index};
+        Leaf new_leaf = {node, data};
+        leaves.push_back(new_leaf); 
+        return {index, index};
     } else {
-        if (y < ymedian) {
-            subtree_height = SE->insert(datum);
-        } else {
-            subtree_height = NE->insert(datum);
+        // Partition the data
+        array<vector<Datum<T>>, 4> partition;
+        for (int i=0; i<(int)data.size(); i++) {
+            int quadrant = get_quadrant(node->center, data[i].point);
+            partition[quadrant].push_back(data[i]);
         }
+        data.clear(); // Free up some memory
+
+        // Create 4 child-quadrants and recurse with the appropriate partition
+        node->create_children();
+        Range child_leaf_range;
+
+        // The NW child will contain the leaf with the lowest Z-order code
+        child_leaf_range = recursive_build(node->children[0], partition[0]);
+        node->leaf_range.start = child_leaf_range.start;
+
+        // The leaves in the NE and SW children all fall inside this range
+        recursive_build(node->children[1], partition[1]);
+        recursive_build(node->children[2], partition[2]);
+
+        // The SE child will contain the leaf with the highest Z-order code
+        child_leaf_range = recursive_build(node->children[3], partition[3]);
+        node->leaf_range.end = child_leaf_range.end;
+
+        return node->leaf_range;
     }
-    /**
-     * We could add a 3rd case here to check that the datum
-     * actually falls inside of the current cell's bounds
-     */
-    return subtree_height;
 }
 
-// Split the current full node into 4 quadrants
+/**
+ * A note on the differing comparison operators: Z-ordering 0 is to the NW,
+ * but the geographic coordinate (0,0) is in the SW. So, while it looks weird,
+ * this is just us converting from geographic coords to Z-ordering.
+ */
 template<typename T>
-int spatial::Quadtree<T>::split_node() {
-    NW = new spatial::Quadtree<T>(bounds.xmin, xmedian, ymedian, bounds.ymax);
-    NE = new spatial::Quadtree<T>(xmedian, bounds.xmax, ymedian, bounds.ymax);
-    SW = new spatial::Quadtree<T>(bounds.xmin, xmedian, bounds.ymin, ymedian);
-    SE = new spatial::Quadtree<T>(xmedian, bounds.xmax, bounds.ymin, ymedian);
-
-    // Distribute the node's points to the appropriate children
-    int max_subtree_height = 1;
-    int temp_subtree_height;
-    spatial::Datum<T> datum;
-    for (int i=0; i<MAX_LEAF_SIZE; i++) {
-        datum = this->data[i];
-        temp_subtree_height = recursive_insert(datum);
-        if (temp_subtree_height > max_subtree_height) {
-            max_subtree_height = temp_subtree_height;
-        }
-    }
-    delete[] this->data;
-    return (1 + max_subtree_height);
+int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) {
+    return ((p.x > origin.x) + ((p.y < origin.y) << 1));
 }
 
 template<typename T>
-int spatial::Quadtree<T>::getHeight() { return height; }
+void spatial::Quadtree<T>::Node::create_children() {
+    Rectangle NW_bounds = {bounds.xmin, center.x, center.y, bounds.ymax};
+    children[0] = new Node(this, depth+1, (code << 2) + 0, NW_bounds);
+
+    Rectangle NE_bounds = {center.x, bounds.xmax, center.y, bounds.ymax};
+    children[1] = new Node(this, depth+1, (code << 2) + 1, NE_bounds);
+
+    Rectangle SW_bounds = {bounds.xmin, center.x, bounds.ymin, center.y};
+    children[2] = new Node(this, depth+1, (code << 2) + 2, SW_bounds);
+    
+    Rectangle SE_bounds = {center.x, bounds.xmax, bounds.ymin, center.y};
+    children[3] = new Node(this, depth+1, (code << 2) + 3, SE_bounds);
+}
 
 template<typename T>
-int spatial::Quadtree<T>::getLoad() { return load; }
-
-template<typename T>
-bool spatial::Quadtree<T>::isLeaf() { return (NW == NULL); }
+int spatial::Quadtree<T>::num_leaves() { return leaves.size(); }
