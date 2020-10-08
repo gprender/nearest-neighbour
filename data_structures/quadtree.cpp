@@ -52,8 +52,8 @@ spatial::Range spatial::Quadtree<T>::recursive_build(
         node->leaf_range.start = child_leaf_range.start;
 
         // The leaves in the NE and SW children all fall inside this range
-        child_leaf_range = recursive_build(node->children[1], partition[1]);
-        child_leaf_range = recursive_build(node->children[2], partition[2]);
+        recursive_build(node->children[1], partition[1]);
+        recursive_build(node->children[2], partition[2]);
 
         // The SE child will contain the leaf with the highest Z-order code
         child_leaf_range = recursive_build(node->children[3], partition[3]);
@@ -208,8 +208,8 @@ typename spatial::Quadtree<T>::Node* spatial::Quadtree<T>::find_leaf(const Point
 
 /**
  * A note on the differing comparison operators: Z-ordering 0 is to the NW,
- * but the geographic coordinate (0,0) would be in the SW. So, while it
- * looks weird, this is just converting from geographic coords to Z-ordering.
+ * but the geographic coordinate (0,0) is in the SW. So, while it looks weird,
+ * this is just converting from geographic coordinates to Z-ordering.
  */
 template<typename T>
 int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) {
