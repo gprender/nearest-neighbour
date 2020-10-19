@@ -1,7 +1,5 @@
 // quadtree.cpp
 
-#include <queue>
-
 #include "quadtree.hpp"
 
 int const MAX_LEAF_SIZE = 8;
@@ -34,8 +32,7 @@ spatial::Range spatial::Quadtree<T>::build(std::vector<T> const raw_data) {
 
 template<typename T>
 spatial::Range spatial::Quadtree<T>::recursive_build(
-    Node* const node, std::vector<Datum<T>> data
-) {
+        Node* const node, std::vector<Datum<T>> data) {
     if (data.size() <= MAX_LEAF_SIZE) {
         // Create a new leaf node
         index_t const index = leaves.size();
@@ -80,13 +77,9 @@ void spatial::Quadtree<T>::recursive_deconstruct(Node* const node) {
 }
 
 /**
- * Query the quadtree for the k-nearest neighbours of a query point.
- * We do this with a doubly-greedy approach. First, we keep track of a priority
- * queue of quadtree nodes (initialized with just the root), and repeatedly
- * expand the node closest to the query point. As we find leaf nodes, we fill
- * up a second priority queue containing the nearest neighbours so far. Once
- * we have k points, and our "worst" nearest neighbour is closer than the next 
- * closest node, we terminate the search and return the k-nearest neighbours.
+ * Query the quadtree for all points "around" a given query point.
+ * Currently, this means all points in the query point's leaf, as well as
+ * all points in the 8 leaves which border on the query point's leaf.
  */
 template<typename T>
 std::vector<T> spatial::Quadtree<T>::query(coord_t const x, coord_t const y) {
@@ -184,11 +177,7 @@ typename spatial::Quadtree<T>::Node* spatial::Quadtree<T>::traverse(
         if (current_node->code == target_code >> (2*depth_difference)) {
             break;
         } else {
-            // Expand the node, adding its children to the priority queue
-            for (auto const& child : npqe.node->children) {
-                coord_t const dist = distance(query_point, child->bounds);
-                node_pq.push((NodePQE){child, dist});
-            }
+            current_node = current_node->parent;
         }
     }
 
@@ -212,7 +201,7 @@ typename spatial::Quadtree<T>::Node* spatial::Quadtree<T>::find_leaf(const Point
         next_quadrant = get_quadrant(current_node->center, p);
         current_node = current_node->children[next_quadrant];
     }
-    return query_bucket;
+    return current_node;
 }
 
 /**
@@ -227,18 +216,6 @@ int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) {
 
 template<typename T>
 int spatial::Quadtree<T>::num_leaves() { return leaves.size(); }
-
-/**
- * Verify that EVERY leaf in the quadtree is at depth k
- * Note that this will only pass for a complete quadtree of depth k
- */
-template<typename T>
-bool spatial::Quadtree<T>::check_depth_equals(unsigned const k) {
-    for (auto const& leaf : leaves) {
-        if (leaf.node->depth != k) return false;
-    }
-    return true;
-}
 
 template<typename T>
 void spatial::Quadtree<T>::Node::create_children() {
