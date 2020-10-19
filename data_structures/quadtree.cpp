@@ -4,6 +4,10 @@
 
 int const MAX_LEAF_SIZE = 8;
 
+using coord_t = spatial::coord_t;
+using code_t = spatial::code_t;
+using index_t = spatial::index_t;
+
 template<typename T>
 spatial::Quadtree<T>::Quadtree(coord_t x0, coord_t x1, coord_t y0, coord_t y1):
     root(new Node(NULL, 0, 0, (Rectangle){x0, x1, y0, y1})) {}
@@ -38,16 +42,15 @@ spatial::Range spatial::Quadtree<T>::recursive_build(
     } else {
         // Partition the data into four quadrants
         std::array<std::vector<Datum<T>>, 4> partition;
-        int quadrant;
         for (auto const& datum : data) {
-            quadrant = get_quadrant(node->center, datum.point);
+            int const quadrant = get_quadrant(node->center, datum.point);
             partition[quadrant].push_back(datum);
         }
         // Create 4 child-quadrants and recurse with the appropriate partition
         node->create_children();
-        Range child_leaf_range;
 
         // The NW child will contain the leaf with the lowest Z-order code
+        Range child_leaf_range;
         child_leaf_range = recursive_build(node->children[0], partition[0]);
         node->leaf_range.start = child_leaf_range.start;
 
@@ -96,9 +99,9 @@ std::vector<T> spatial::Quadtree<T>::query(coord_t const x, coord_t const y) {
     }
     // Next, collect points from the five non-sibling neighbours
     // A small optimization here could be to group sibling codes together
-    Node *target_node, *last_node = NULL;
-    for (auto const& target_code : neighbour_codes) {
-        target_node = traverse(origin_node, target_code);
+    Node* last_node = NULL;
+    for (auto const target_code : neighbour_codes) {
+        Node* const target_node = traverse(origin_node, target_code);
 
         // Ensure we're not querying a node >1 time; this can happen if we
         // reach a leaf before getting to the target depth
@@ -106,9 +109,9 @@ std::vector<T> spatial::Quadtree<T>::query(coord_t const x, coord_t const y) {
             // Since we keep track of each nodes' contiguous range of leaves
             // in the leaf vector, collecting points from a leaf is the same
             // as collecting points from an internal node
-            int const start = target_node->leaf_range.start;
-            int const end = target_node->leaf_range.end;
-            for (int i=start; i<=end; i++) {
+            index_t const start = target_node->leaf_range.start;
+            index_t const end = target_node->leaf_range.end;
+            for (index_t i=start; i<=end; i++) {
                 for (auto const& datum : leaves[i].bucket) {
                     query_bucket.push_back(datum.data);
                 }
@@ -128,21 +131,17 @@ std::vector<T> spatial::Quadtree<T>::query(coord_t const x, coord_t const y) {
 template<typename T>
 std::vector<code_t> spatial::Quadtree<T>::calc_neighbour_codes(
         const code_t origin_code, const int depth) {
-    std::vector<code_t> codes;
-
-    code_t d0, d1; // Used to store 2-bit code digits
-    code_t c0, c1; // Used to store full codes
-
     // Calculate a code for each direction, clockwise starting from north
+    std::vector<code_t> codes;
     for (int i=0; i<8; i++) {
         int direction = i; // Initial neighbour direction
-        c0 = origin_code;
+        code_t c0 = origin_code;
 
         // Calculate each new digit in order (right to left)
         for (int j=0; j<depth; j++) {
-            d0 = (origin_code >> (2*j)) & 3; // digit j of the origin code
-            d1 = fsm[d0][direction][0]; // digit j of the neighbour code
-            c1 = ~(3 << (2*j)); // a bit mask to clear the jth digit of a code
+            code_t const d0 = (origin_code >> (2*j)) & 3; // origin digit j
+            code_t const d1 = fsm[d0][direction][0]; // neighbour digit j
+            code_t const c1 = ~(3 << (2*j)); // bitmask to clear digit j
 
             c0 &= c1; // Clear the jth digit of the origin code
             c0 |= (d1 << (2*j)); // Set the jth digit of the new neighbour code
@@ -170,25 +169,24 @@ template<typename T>
 typename spatial::Quadtree<T>::Node* spatial::Quadtree<T>::traverse(
         Node* const origin_node, code_t const target_code) {
     int const origin_depth = origin_node->depth;
-    int depth_difference;
     
     // Ascend the tree until we find a common ancestor node
     Node* current_node = origin_node;
     while (true) {
-        depth_difference = origin_depth - current_node->depth;
+        int const depth_difference = origin_depth - current_node->depth;
         if (current_node->code == target_code >> (2*depth_difference)) {
             break;
         } else {
             current_node = current_node->parent;
         }
     }
+
     // Descend the tree according to the target location code
     // Note that we might hit a leaf before reaching the target location,
     // or we might discover that the target is an internal node
-    int next_quadrant;
     while (!current_node->is_leaf()) {
-        depth_difference = origin_depth - current_node->depth;
-        next_quadrant = (target_code >> (2*(depth_difference - 1))) & 3;
+        int const depth_difference = origin_depth - current_node->depth;
+        int const next_quadrant = (target_code >> (2*(depth_difference - 1))) & 3;
         current_node = current_node->children[next_quadrant];
     }
     return current_node;

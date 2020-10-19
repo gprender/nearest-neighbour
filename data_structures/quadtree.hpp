@@ -5,12 +5,12 @@
 
 #pragma once
 
-// Type aliases! These could also go inside of the namespace
-using coord_t = double; // Needs to fit whatever numbers are used for data
-using code_t = long long int; // Needs at least 2*(quadtree height) bits
-using index_t = unsigned long int; // Needs to fit the total # of leaves
-
 namespace spatial {
+
+    // Type aliases!
+    using coord_t = double; // Needs to fit whatever numbers are used for data
+    using code_t = long long int; // Needs at least 2*(quadtree height) bits
+    using index_t = unsigned long int; // Needs to fit the total # of leaves
  
     struct Range { index_t start, end; };
     struct Rectangle { coord_t xmin, xmax, ymin, ymax; };
@@ -23,7 +23,7 @@ namespace spatial {
     }
 
     /**
-     * A "datum" is a single element in the quadtree. Contains the raw data T,
+     * A "datum" is a single element in the quadtree. Contains the raw data,
      * as well as a 2d interpretation of that data as a "point".
      */
     template<typename T>
