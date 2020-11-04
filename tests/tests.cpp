@@ -60,6 +60,11 @@ bool check_ordering(
  * 
  *  3. If we find a point which is at least as close to the query point as the one
  *      we identified in (1.), we verify that point is a member of the query result
+ * 
+ * There's some ambiguity here if we come across the case where multiple points
+ * in the quadtree are equidistant to the k'th nearest neighbour, in that we 
+ * don't run any checks on such points. This might be bad, but it shouldn't
+ * give false positives or false negatives for correctness. Be aware though!
  */
 bool check_knn(
     std::vector<std::vector<coord_t>> knn, 
@@ -73,7 +78,8 @@ bool check_knn(
         coord_t const current_dist = spatial::distance(
             query_point, (spatial::Point){point[0], point[1]}
         );
-        if (current_dist <= max_knn_dist) {
+        // NOTE: We're not checking when current == max
+        if (current_dist < max_knn_dist) {
             if (std::find(
                     point_data.begin(), 
                     point_data.end(), 

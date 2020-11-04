@@ -40,16 +40,18 @@ void benchmark(std::string filename) {
     std::cout << "\tQuerying k-nearest neighbours x1000...\n";
     for (auto k : {1, 8, 16, 32}) {
         std::cout << "\t\tk=" << k << ":\t";
+        coord_t filler;
         start = std::chrono::system_clock::now();
         for (auto e : qreader.get_point_data()) {
-            qt->query_knn(k, e[0], e[1]);
+            auto const knn = qt->query_knn(k, e[0], e[1]);
+            filler += knn[0][2];
         }
         end = std::chrono::system_clock::now();
         elapsed = std::chrono::duration_cast<std::chrono::microseconds>
             (end - start).count();
-        std::cout << elapsed << " microseconds\n";
+        std::cout << elapsed << " microseconds";
+        std::cout << "\t(filler: " << filler << ")\n";
     }
-
     std::cout << "\n";
 
     delete qt;

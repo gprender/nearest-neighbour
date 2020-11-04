@@ -1,7 +1,7 @@
 // memusage.cpp
 /**
  * Note that this testing program uses windows-specific header files,
- * and as such will not work on Linux machines.
+ * and as such will not work on Linux machines. Requires -lpsapi when compiling
  */
 
 #include <iostream>
