@@ -87,15 +87,17 @@ void spatial::Quadtree<T>::recursive_deconstruct(Node* const node) {
  * up a second priority queue containing the nearest neighbours so far. Once
  * we have k points, and our "worst" nearest neighbour is closer than the next 
  * closest node, we terminate the search and return the k-nearest neighbours.
+ * 
+ * This function is pretty heavy as-is, and should probably be split up
  */
 template<typename T>
 std::vector<T> spatial::Quadtree<T>::query_knn(
     unsigned const k, coord_t const x, coord_t const y
-) {
+) const {
     Point const query_point = {x, y};
 
     // Set up the node priority queue
-    auto const node_cmp = [](NodePQE a, NodePQE b) {
+    auto const node_cmp = [](NodePQE const a, NodePQE const b) {
         return (a.dist > b.dist);
     };
     std::priority_queue<NodePQE, std::vector<NodePQE>, decltype(node_cmp)> 
@@ -103,7 +105,7 @@ std::vector<T> spatial::Quadtree<T>::query_knn(
     node_pq.push((NodePQE){root, distance(query_point, root->bounds)});
 
     // Set up the datum priority queue
-    auto const datum_cmp = [](DatumPQE a, DatumPQE b) {
+    auto const datum_cmp = [](DatumPQE const& a, DatumPQE const& b) {
         return (a.dist < b.dist);
     };
     std::priority_queue<DatumPQE, std::vector<DatumPQE>, decltype(datum_cmp)> 
@@ -154,19 +156,19 @@ std::vector<T> spatial::Quadtree<T>::query_knn(
  * this is just converting from geographic coordinates to Z-ordering.
  */
 template<typename T>
-int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) {
+int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) const {
     return ((p.x > origin.x) + ((p.y < origin.y) << 1));
 }
 
 template<typename T>
-int spatial::Quadtree<T>::num_leaves() { return leaves.size(); }
+int spatial::Quadtree<T>::num_leaves() const { return leaves.size(); }
 
 /**
  * Verify that EVERY leaf in the quadtree is at depth k
  * Note that this will only pass for a complete quadtree of depth k
  */
 template<typename T>
-bool spatial::Quadtree<T>::check_depth_equals(unsigned const k) {
+bool spatial::Quadtree<T>::depth_equals(unsigned const k) const {
     for (auto const& leaf : leaves) {
         if (leaf.node->depth != k) return false;
     }
