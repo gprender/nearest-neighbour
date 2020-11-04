@@ -4,7 +4,7 @@
 
 #include "quadtree.hpp"
 
-int const MAX_LEAF_SIZE = 128;
+int const MAX_LEAF_SIZE = 8;
 
 using coord_t = spatial::coord_t;
 using code_t = spatial::code_t;
