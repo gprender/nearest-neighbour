@@ -10,9 +10,10 @@
 namespace spatial {
 
     // Type aliases!
-    using coord_t = double; // Needs to fit whatever numbers are used for data
-    using code_t = long long int; // Needs at least 2*(quadtree height) bits
-    using index_t = unsigned long int; // Needs to fit the total # of leaves
+    using coord_t = double;  // Needs to fit whatever numbers are used for data
+    using area_t = coord_t;  // Better semantics for area calculations
+    using code_t = long long int;  // Needs at least 2*(quadtree height) bits
+    using index_t = unsigned long int;  // Needs to fit the total # of leaves
  
     struct Range { index_t start, end; };
     struct Rectangle { coord_t xmin, xmax, ymin, ymax; };
@@ -38,7 +39,7 @@ namespace spatial {
         return std::sqrt(dx*dx + dy*dy);
     }
 
-    coord_t area(Rectangle const rect) {
+    area_t area(Rectangle const rect) {
         return (rect.xmax - rect.xmin)*(rect.ymax - rect.ymin);
     }
 
@@ -66,7 +67,15 @@ namespace spatial {
             std::max(r1.ymax, r2.ymax)
         };
         return mbb;
-    }    
+    }
+
+    void print_rect(Rectangle const rect) {
+        std::cout << std::fixed << std::setprecision(2) 
+                  << "x[" << rect.xmin << ", " << rect.xmax << "]  ";
+
+        std::cout << std::fixed << std::setprecision(2) 
+                  << "y[" << rect.ymin << ", " << rect.ymax << "]\n";
+    }
 
     /**
      * A single element in a 2d space partitioning tree.
