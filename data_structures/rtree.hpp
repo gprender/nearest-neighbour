@@ -63,32 +63,15 @@ namespace spatial {
                     }
 
                     std::shared_ptr<Datum<T>> get_datum() const { 
-                        try {
-                            return std::get<std::shared_ptr<Datum<T>>>(
-                                _contents
-                            ); 
-                        } catch (...) {
-                            std::cout << "Bad polymorphism 1. oof.\n";
-
-                            print_rect(this->get_mbb());
-                            std::cout << this->get_node()->load << ", ";
-                            std::cout << this->get_node()->entries.size() << "\n";
-
-                            exit(0);
-                        }
-
-                    }
+                        return std::get<std::shared_ptr<Datum<T>>>(
+                            _contents
+                        );
+                }
 
                     std::shared_ptr<Node> get_node() const { 
-                        try {
-                            return std::get<std::shared_ptr<Node>>(
-                                _contents
-                            ); 
-                        } catch (...) {
-                            std::cout << "Bad polymorphism 2. oof.\n";
-                            exit(0);
-                        }
-                        
+                        return std::get<std::shared_ptr<Node>>(
+                            _contents
+                        );
                     }
 
                     bool is_leaf_entry() const {
