@@ -1,5 +1,6 @@
 // rtree.hpp
 
+#include <queue>
 #include <memory>
 #include <vector>
 #include <variant>
@@ -62,16 +63,154 @@ namespace spatial {
                     }
 
                     std::shared_ptr<Datum<T>> get_datum() const { 
-                        return std::get<std::shared_ptr<Datum<T>>>(
-                            _contents
-                        ); 
+                        try {
+                            return std::get<std::shared_ptr<Datum<T>>>(
+                                _contents
+                            ); 
+                        } catch (...) {
+                            std::cout << "Bad polymorphism 1. oof.\n";
+
+                            print_rect(this->get_mbb());
+                            std::cout << this->get_node()->load << ", ";
+                            std::cout << this->get_node()->entries.size() << "\n";
+
+                            exit(0);
+                        }
+
                     }
 
                     std::shared_ptr<Node> get_node() const { 
-                        return std::get<std::shared_ptr<Node>>(
-                            _contents
-                        ); 
+                        try {
+                            return std::get<std::shared_ptr<Node>>(
+                                _contents
+                            ); 
+                        } catch (...) {
+                            std::cout << "Bad polymorphism 2. oof.\n";
+                            exit(0);
+                        }
+                        
                     }
+
+                    bool is_leaf_entry() const {
+                        return std::holds_alternative
+                            <std::shared_ptr<Datum<T>>>(
+                                _contents
+                            );
+                    }
+            };
+
+            /**
+             * A thin wrapper around a std::priority_queue for Entries.
+             * Helps to simplify the distance browsing code.
+             */
+            class EntryPQ {
+                private:
+                    struct EntryPQE {
+                        Entry entry;
+                        coord_t dist;
+                    };
+
+                    struct Closer {
+                        bool operator()(EntryPQE const a, EntryPQE const b) {
+                            return (a.dist > b.dist);
+                        }
+                    };
+
+                    std::priority_queue<
+                        EntryPQE, 
+                        std::vector<EntryPQE>, 
+                        Closer
+                    > pq;
+
+                    Point query_point;
+
+                public:
+                    EntryPQ(Point p):
+                        query_point(p)
+                    { }
+
+                    void push(Entry e) {
+                        pq.push(
+                            (EntryPQE){e, distance(query_point, e.get_mbb())}
+                        );
+                    }
+
+                    EntryPQE pop() {
+                        auto const pqe = pq.top();
+                        pq.pop();
+                        return pqe;
+                    }
+
+                    EntryPQE peek() { return pq.top(); }
+
+                    /**
+                     * Push all of an entry's children onto the priority queue.
+                     */
+                    void expand(Entry e) {
+                        for (auto const& child : e.get_node()->entries) {
+                            push(child);
+                        }
+                    }
+            };
+
+            /**
+             * Similar to above class, but with Datum elements. 
+             */
+            class DatumPQ {
+                private:
+                    struct DatumPQE {
+                        Datum<T> datum;
+                        coord_t dist;
+                    };
+
+                    struct Farther {
+                        bool operator()(DatumPQE const a, DatumPQE const b) {
+                            return (a.dist < b.dist);
+                        }
+                    };
+
+                    std::priority_queue<
+                            DatumPQE, 
+                            std::vector<DatumPQE>, 
+                            Farther
+                    > pq;
+
+                    Point query_point;
+
+                public:
+                    DatumPQ(Point p):
+                        query_point(p)
+                    { }
+                
+                    void push(Datum<T> d) {
+                        pq.push(
+                            (DatumPQE){d, distance(query_point, d.point)}
+                        );
+                    }
+
+                    DatumPQE pop() {
+                        auto const pqe = pq.top();
+                        pq.pop();
+                        return pqe;
+                    }
+
+                    DatumPQE peek() { return pq.top(); }
+
+                    /**
+                     * Conditionally push a datum onto the priority queue,
+                     * if it's closer than the top (furthest) element.
+                     */
+                    void choose(Datum<T> d) {
+                        coord_t const new_dist = distance(query_point, d.point);
+                        if (pq.top().dist > new_dist) {
+                            pq.pop();
+                            pq.push((DatumPQE){d, new_dist});
+                        }
+                    }
+
+                    unsigned size() { return pq.size(); }
+
+                    bool empty() { return (pq.size() == 0); }
             };
 
             std::unique_ptr<Entry> root_entry;
