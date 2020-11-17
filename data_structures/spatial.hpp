@@ -47,26 +47,45 @@ namespace spatial {
      * Calculate the minimum bounding box of a rectangle and a point.
      */
     Rectangle min_bounding_box(Rectangle const rect, Point const p) {
-        Rectangle mbb = {
+        return (Rectangle) {
             std::min(rect.xmin, p.x),
             std::max(rect.xmax, p.x),
             std::min(rect.ymin, p.y),
             std::max(rect.ymax, p.y)
         };
-        return mbb;
     }
 
     /**
      * Calculate the minimum bounding box of two rectangles.
      */
     Rectangle min_bounding_box(Rectangle const r1, Rectangle const r2) {
-        Rectangle mbb = {
+        return (Rectangle) {
             std::min(r1.xmin, r2.xmin),
             std::max(r1.xmax, r2.xmax),
             std::min(r1.ymin, r2.ymin),
             std::max(r1.ymax, r2.ymax)
         };
-        return mbb;
+    }
+
+    /**
+     * Verify whether one rectangle contains another.
+     */
+    bool contains(Rectangle const outer, Rectangle const inner) {
+        return (
+            outer.xmin <= inner.xmin 
+            && outer.xmax >= inner.xmax 
+            && outer.ymin <= inner.ymin 
+            && outer.ymax >= inner.ymax
+        );
+    }
+
+    bool contains(Rectangle const rect, Point const p) {
+        return (
+            rect.xmin <= p.x
+            && rect.xmax >= p.x 
+            && rect.ymin <= p.y 
+            && rect.ymax >= p.y
+        );
     }
 
     void print_rect(Rectangle const rect) {

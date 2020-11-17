@@ -122,7 +122,7 @@ bool spatial::Rtree<T>::Node::insert(Datum<T> const& datum) {
     } else {
         // we're in an internal node, and need to descend further
         int const branch_idx = choose_branch(p);
-        Entry child_entry = entries[branch_idx];
+        Entry& child_entry = entries[branch_idx];
 
         // expand the child's bounding box as needed
         child_entry.set_mbb(min_bounding_box(
@@ -199,6 +199,7 @@ void spatial::Rtree<T>::Node::pick_seeds(
         }
     }
     // create two new entries corresponding to the above seed MBBs
+    // this should probably be done inside of split()
     entries.push_back(Entry(
         entry_choices[best_e1].get_mbb(),
         std::make_shared<Node>()
@@ -211,8 +212,6 @@ void spatial::Rtree<T>::Node::pick_seeds(
 
 /**
  * Distribute leftover entries after splitting an overflowing node.
- * This function is a bit of a mouthful, particularly the if/else stack
- * at the end, so it could probably do with some revisiting.
  */
 template<typename T>
 void spatial::Rtree<T>::Node::distribute(
@@ -238,20 +237,21 @@ void spatial::Rtree<T>::Node::distribute(
         area_t const g1_expansion = area(g1_expanded_mbb) - area(g1.get_mbb());
         area_t const g2_expansion = area(g2_expanded_mbb) - area(g2.get_mbb());
 
-        // choose the group which requires the least expansion
-        auto is_smaller = [&g1, &g2]
-            (area_t const g1_exp, area_t const g2_exp) {
-                if (g1_exp == g2_exp) {
-                    return (area(g1.get_mbb()) < area(g2.get_mbb()));
-                } else {
-                    return (g1_exp < g2_exp);
-                }
-            };
+        // distribute to the group which requires the least expansion
+        auto is_smaller = [&g1, &g2] (
+            area_t const g1_exp, area_t const g2_exp
+        ) {
+            if (g1_exp == g2_exp) {
+                return (area(g1.get_mbb()) < area(g2.get_mbb()));
+            } else {
+                return (g1_exp < g2_exp);
+            }
+        };
 
         if (is_smaller(g1_expansion, g2_expansion)) {
             g1.set_mbb(g1_expanded_mbb);
             g1.get_node()->entries.push_back(next_entry);
-            if (area(next_entry.get_mbb()) == 0) {
+            if (next_entry.is_leaf_entry()) {
                 g1.get_node()->load++;
             } else {
                 g1.get_node()->load += next_entry.get_node()->load;
@@ -259,7 +259,7 @@ void spatial::Rtree<T>::Node::distribute(
         } else {
             g2.set_mbb(g2_expanded_mbb);
             g2.get_node()->entries.push_back(next_entry);
-            if (area(next_entry.get_mbb()) == 0) {
+            if (next_entry.is_leaf_entry()) {
                 g2.get_node()->load++;
             } else {
                 g2.get_node()->load += next_entry.get_node()->load;
@@ -301,7 +301,7 @@ int spatial::Rtree<T>::Node::pick_next(
 /**
  * Pick an appropriate child node for a point.
  * Specifically, we pick the bounding box which requires the
- * smallest (area) expansion to accommodate the new point.
+ * smallest area expansion to accommodate the new point.
  */
 template<typename T>
 int spatial::Rtree<T>::Node::choose_branch(Point const p) const {
@@ -336,7 +336,7 @@ spatial::index_t spatial::Rtree<T>::get_load() const {
 }
 
 /**
- * This is even worse than before, do it with type traits!
+ * This isn't great, and can probably be done better with type traits
  */
 template<typename T>
 bool spatial::Rtree<T>::Node::is_leaf() const { 
@@ -344,4 +344,66 @@ bool spatial::Rtree<T>::Node::is_leaf() const {
         entries.empty()
         || entries[0].is_leaf_entry()
     );
+}
+
+/**
+ * Verify that for each node in the R-tree, that node's load
+ * is equal to the sum of its childrens' loads.
+ */
+template<typename T>
+bool spatial::Rtree<T>::check_load() const {
+    return root_entry->get_node()->check_load();
+}
+
+/**
+ * Verify that for each entry in the R-tree, that entry's MBB
+ * contains all child entries' MBBs.
+ */
+template<typename T>
+bool spatial::Rtree<T>::check_mbbs() const {
+    return root_entry->check_mbbs();
+}
+
+/**
+ * Recursive check_load
+ */
+template<typename T>
+bool spatial::Rtree<T>::Node::check_load() const {
+    if (this->is_leaf()) {
+        return true;
+    } else {
+        index_t sum_loads = 0;
+        for (auto const& child_entry : entries) {
+            sum_loads += child_entry.get_node()->load;
+        }
+
+        if (sum_loads == this->load) {
+            for (auto const& child_entry : entries) {
+                if (!child_entry.get_node()->check_load()) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+/**
+ * Recursive check_mbbs
+ */
+template<typename T>
+bool spatial::Rtree<T>::Entry::check_mbbs() const {
+    if (this->is_leaf_entry()) {
+        return true; 
+    } else {
+        for (auto const& child_entry : this->get_node()->entries) {
+            if (!contains(this->get_mbb(), child_entry.get_mbb())
+                || !child_entry.check_mbbs()) {
+                return false; 
+            }
+        }
+        return true;
+    }
 }
