@@ -68,6 +68,44 @@ void spatial::Rtree<T>::insert(Datum<T> const& new_datum) {
 }
 
 /**
+ * Greedy k-NN query using distance browsing.
+ */
+template<typename T>
+std::vector<T> spatial::Rtree<T>::query_knn(
+    unsigned const k, coord_t const x, coord_t const y
+) const {
+    Point const query_point = {x,y};
+
+    EntryPQ entry_pq(query_point);
+    entry_pq.push(*root_entry);
+    DatumPQ datum_pq(query_point);
+
+    while (
+        datum_pq.size() < k
+        || datum_pq.peek().dist > entry_pq.peek().dist
+    ) {
+        Entry const next_entry = entry_pq.pop().entry;
+        if (next_entry.get_node()->is_leaf()) {
+            for (auto const& leaf_entry : next_entry.get_node()->entries) {
+                if (datum_pq.size() < k) {
+                    datum_pq.push(*(leaf_entry.get_datum()));
+                } else {
+                    datum_pq.choose(*(leaf_entry.get_datum()));
+                } 
+            }
+        } else {
+            entry_pq.expand(next_entry);
+        }
+    }
+    std::vector<T> query_bucket;
+    query_bucket.reserve(k);
+    while (!datum_pq.empty()) {
+        query_bucket.push_back(datum_pq.pop().datum.data);
+    }
+    return query_bucket;
+}
+
+/**
  * Recursively insert a point into the current node.
  * If a node exceeds M entries, we return 'true' to indicate that a split
  * is required, since splitting happens at the parent's level.  
@@ -201,25 +239,31 @@ void spatial::Rtree<T>::Node::distribute(
         area_t const g2_expansion = area(g2_expanded_mbb) - area(g2.get_mbb());
 
         // choose the group which requires the least expansion
-        if (g1_expansion < g2_expansion) {
+        auto is_smaller = [&g1, &g2]
+            (area_t const g1_exp, area_t const g2_exp) {
+                if (g1_exp == g2_exp) {
+                    return (area(g1.get_mbb()) < area(g2.get_mbb()));
+                } else {
+                    return (g1_exp < g2_exp);
+                }
+            };
+
+        if (is_smaller(g1_expansion, g2_expansion)) {
             g1.set_mbb(g1_expanded_mbb);
             g1.get_node()->entries.push_back(next_entry);
-            g1.get_node()->load++;
-        } else if (g1_expansion == g2_expansion) {
-            // break the tie (pick the group w/ the smallest MBB)
-            if (area(g1.get_mbb()) < area(g2.get_mbb())) {
-                g1.set_mbb(g1_expanded_mbb);
-                g1.get_node()->entries.push_back(next_entry);
+            if (area(next_entry.get_mbb()) == 0) {
                 g1.get_node()->load++;
             } else {
-                g2.set_mbb(g2_expanded_mbb);
-                g2.get_node()->entries.push_back(next_entry);
-                g2.get_node()->load++;
+                g1.get_node()->load += next_entry.get_node()->load;
             }
         } else {
             g2.set_mbb(g2_expanded_mbb);
             g2.get_node()->entries.push_back(next_entry);
-            g2.get_node()->load++;
+            if (area(next_entry.get_mbb()) == 0) {
+                g2.get_node()->load++;
+            } else {
+                g2.get_node()->load += next_entry.get_node()->load;
+            }
         }
     }
 }
@@ -291,7 +335,13 @@ spatial::index_t spatial::Rtree<T>::get_load() const {
     return root_entry->get_node()->load; 
 }
 
+/**
+ * This is even worse than before, do it with type traits!
+ */
 template<typename T>
 bool spatial::Rtree<T>::Node::is_leaf() const { 
-    return (entries.size() == load);
+    return (
+        entries.empty()
+        || entries[0].is_leaf_entry()
+    );
 }
