@@ -1,4 +1,11 @@
 // tests.cpp
+/**
+ * No command line arguments for the correctness testing here, since we're
+ * testing behaviour specific to particular data files.
+ * 
+ * Note that compile time is pretty substantial for this file,
+ * as a result of the Catch header.
+ */
 
 #include <iostream>
 #include <iomanip>
@@ -8,6 +15,7 @@
 #include "catch.hpp"
 
 #include "../data_structures/quadtree.cpp"
+#include "../data_structures/rtree.cpp"
 #include "lidar_reader.cpp"
 
 /**
@@ -34,8 +42,8 @@ using coord_t = spatial::coord_t;
  * that the point priority queue used in queries is working as expected
  */
 bool check_ordering(
-    std::vector<std::vector<coord_t>> knn, 
-    spatial::Point query_point
+    std::vector<std::vector<coord_t>> const& knn, 
+    spatial::Point const& query_point
 ) {
     for (unsigned i=0; i<knn.size()-1; i++) {
         coord_t const dista = spatial::distance(
@@ -67,9 +75,9 @@ bool check_ordering(
  * give false positives or false negatives for correctness. Be aware though!
  */
 bool check_knn(
-    std::vector<std::vector<coord_t>> knn, 
-    spatial::Point query_point,
-    std::vector<std::vector<coord_t>> point_data
+    std::vector<std::vector<coord_t>> const& knn, 
+    spatial::Point const& query_point,
+    std::vector<std::vector<coord_t>> const& point_data
 ) {
     coord_t const max_knn_dist = spatial::distance(
         query_point, (spatial::Point){knn[0][0], knn[0][1]}
@@ -94,36 +102,37 @@ bool check_knn(
 TEST_CASE("Make sure all this quadtree code actually works", "[quadtree]") {
 
     SECTION("construction (point partitioning & recursion)") {
-        LidarReader reader = LidarReader(reg2048);
-        auto min = reader.get_min();
-        auto max = reader.get_max();
-        auto qt = new spatial::Quadtree<std::vector<coord_t>>(
+        LidarReader reader(reg2048);
+        auto const& min = reader.get_min();
+        auto const& max = reader.get_max();
+        auto const& point_data = reader.get_point_data();
+
+        spatial::Quadtree<std::vector<coord_t>> qt(
             min[0], max[0], min[1], max[1]
         );
-        qt->build(reader.get_point_data());
+        qt.build(point_data);
 
-        REQUIRE(qt->num_leaves() == (16*16));
-        REQUIRE(qt->check_depth_equals(4));
-
-        delete qt;
+        REQUIRE(qt.num_leaves() == (16*16));
+        REQUIRE(qt.depth_equals(4));
     }
 
     SECTION("k-nearest neighbour querying") {
-        LidarReader reader = LidarReader(rand100k);
-        auto min = reader.get_min();
-        auto max = reader.get_max();
-        auto qt = new spatial::Quadtree<std::vector<coord_t>>(
+        LidarReader reader(rand100k);
+        auto const& min = reader.get_min();
+        auto const& max = reader.get_max();
+        auto const& point_data = reader.get_point_data();
+
+        spatial::Quadtree<std::vector<coord_t>> qt(
             min[0], max[0], min[1], max[1]
         );
-        auto point_data = reader.get_point_data();
-        qt->build(point_data);
+        qt.build(point_data);
 
-        auto knn1 = qt->query_knn(1, 100, 150);
-        auto knn16 = qt->query_knn(16, 300, 450);
-        auto knn32 = qt->query_knn(32, 250, 250);
-        auto knnNW = qt->query_knn(8, 0, 0);
-        auto knnSE = qt->query_knn(8, 500, 500);
-        auto knnXX = qt->query_knn(16, 250, 750);
+        auto const knn1 = qt.query_knn(1, 100, 150);
+        auto const knn16 = qt.query_knn(16, 300, 450);
+        auto const knn32 = qt.query_knn(32, 250, 250);
+        auto const knnNW = qt.query_knn(8, 0, 0);
+        auto const knnSE = qt.query_knn(8, 500, 500);
+        auto const knnXX = qt.query_knn(16, 250, 750);
 
         REQUIRE(check_ordering(knn1, {100, 150}));
         REQUIRE(check_ordering(knn16, {300, 450}));
@@ -138,7 +147,41 @@ TEST_CASE("Make sure all this quadtree code actually works", "[quadtree]") {
         REQUIRE(check_knn(knnNW, {0, 0}, point_data));
         REQUIRE(check_knn(knnSE, {500, 500}, point_data));
         REQUIRE(check_knn(knnXX, {250, 750}, point_data));
+    }
+}
 
-        delete qt;
+TEST_CASE("R-tree correctness testing!", "R-tree") {
+
+    LidarReader reader(rand100k);
+    spatial::Rtree<std::vector<double>> rtree;
+    auto const& point_data = reader.get_point_data();
+    rtree.build(point_data);
+
+    SECTION("construction") {
+        REQUIRE(rtree.check_load());
+        REQUIRE(rtree.check_mbbs());
+    }
+
+    SECTION("k-NN queries") {
+        auto const knn1 = rtree.query_knn(1, 100, 150);
+        auto const knn16 = rtree.query_knn(16, 300, 450);
+        auto const knn32 = rtree.query_knn(32, 250, 250);
+        auto const knnNW = rtree.query_knn(8, 0, 0);
+        auto const knnSE = rtree.query_knn(8, 500, 500);
+        auto const knnXX = rtree.query_knn(16, 250, 750);
+
+        REQUIRE(check_ordering(knn1, {100, 150}));
+        REQUIRE(check_ordering(knn16, {300, 450}));
+        REQUIRE(check_ordering(knn32, {250, 250}));
+        REQUIRE(check_ordering(knnNW, {0, 0}));
+        REQUIRE(check_ordering(knnSE, {500, 500}));
+        REQUIRE(check_ordering(knnXX, {250, 750}));
+
+        REQUIRE(check_knn(knn1, {100, 150}, point_data));
+        REQUIRE(check_knn(knn16, {300, 450}, point_data));
+        REQUIRE(check_knn(knn32, {250, 250}, point_data));
+        REQUIRE(check_knn(knnNW, {0, 0}, point_data));
+        REQUIRE(check_knn(knnSE, {500, 500}, point_data));
+        REQUIRE(check_knn(knnXX, {250, 750}, point_data));
     }
 }

@@ -1,5 +1,7 @@
 // memusage.cpp
 /**
+ * Usage: ./memusage <data1.txt> <data2.txt> ...
+ * 
  * Note that this testing program uses windows-specific header files,
  * and as such will not work on Linux machines. Requires -lpsapi when compiling
  */
@@ -11,11 +13,8 @@
 #include "psapi.h"
 
 #include "../data_structures/quadtree.cpp"
+#include "../data_structures/rtree.cpp"
 #include "lidar_reader.cpp"
-
-std::string const DF1 = "data/rand100k.txt";
-std::string const DF2 = "data/rand500k.txt";
-std::string const DF3 = "data/rand1m.txt";
 
 using coord_t = spatial::coord_t;
 
@@ -29,36 +28,49 @@ size_t process_memusage() {
     return pmc.WorkingSetSize;
 } 
 
-void benchmark(std::string filename) {
-    std::cout << "\nRunning memory benchmark for \'" << filename << "\':\n";
+void quadtree_benchmark(std::string const filename) {
+    std::cout << "\nRunning quadtree memory benchmark for \'" 
+              << filename << "\':\n";
 
     // Parsing the data & header
-    LidarReader reader = LidarReader(filename);
-    auto const min = reader.get_min();
-    auto const max = reader.get_max();
+    LidarReader reader(filename);
+    auto const& min = reader.get_min();
+    auto const& max = reader.get_max();
 
     // Record a memory baseline here
     // The space usage of reading the data isn't relevant 
     auto mem_baseline = process_memusage();
 
-    auto qt = new spatial::Quadtree<std::vector<coord_t>>(
+    spatial::Quadtree<std::vector<coord_t>> qt(
         min[0], max[0], min[1], max[1]
     );
 
-    std::cout << "\tBuilding the quadtree... ";
-    qt->build(reader.get_point_data());
+    std::cout << "\tBuilding the quadtree... \t";
+    qt.build(reader.get_point_data());
     std::cout << process_memusage() - mem_baseline << " bytes used\n";
-
-    delete qt;
 }
 
-int main() {
+void rtree_benchmark(std::string filename) {
+    std::cout << "\nRunning R-tree memory benchmark for \'" 
+              << filename << "\':\n";
 
-    benchmark(DF1);
+    LidarReader reader = LidarReader(filename);
 
-    benchmark(DF2);
+    auto mem_baseline = process_memusage();
 
-    benchmark(DF3);
+    std::cout << "\tBuilding the R-tree...   \t";
+    spatial::Rtree<std::vector<double>> rtree;
+    rtree.build(reader.get_point_data());
+
+    std::cout << process_memusage() - mem_baseline << " bytes used\n";
+}
+
+int main(int argc, char** argv) {
+
+    for (int i=1; i<argc; i++) {
+        quadtree_benchmark(argv[i]);
+        rtree_benchmark(argv[i]);
+    }
 
     return 0;
 }

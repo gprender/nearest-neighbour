@@ -29,7 +29,8 @@ namespace spatial {
                     void pick_seeds(std::vector<Entry> const& entry_choices);
                     void distribute(std::vector<Entry>& leftovers);
                     int pick_next(std::vector<Entry> const& leftovers) const;
-                    bool is_leaf() const;
+                    bool is_leaf() const; 
+                    bool check_load() const;
             };
 
             /**
@@ -80,6 +81,8 @@ namespace spatial {
                                 _contents
                             );
                     }
+
+                    bool check_mbbs() const;
             };
 
             /**
@@ -124,7 +127,7 @@ namespace spatial {
                         return pqe;
                     }
 
-                    EntryPQE peek() { return pq.top(); }
+                    EntryPQE const& peek() const { return pq.top(); }
 
                     /**
                      * Push all of an entry's children onto the priority queue.
@@ -153,9 +156,9 @@ namespace spatial {
                     };
 
                     std::priority_queue<
-                            DatumPQE, 
-                            std::vector<DatumPQE>, 
-                            Farther
+                        DatumPQE, 
+                        std::vector<DatumPQE>, 
+                        Farther
                     > pq;
 
                     Point query_point;
@@ -177,7 +180,7 @@ namespace spatial {
                         return pqe;
                     }
 
-                    DatumPQE peek() { return pq.top(); }
+                    DatumPQE const& peek() const { return pq.top(); }
 
                     /**
                      * Conditionally push a datum onto the priority queue,
@@ -185,7 +188,7 @@ namespace spatial {
                      */
                     void choose(Datum<T> d) {
                         coord_t const new_dist = distance(query_point, d.point);
-                        if (pq.top().dist > new_dist) {
+                        if (peek().dist > new_dist) {
                             pq.pop();
                             pq.push((DatumPQE){d, new_dist});
                         }
@@ -210,5 +213,7 @@ namespace spatial {
                 unsigned const k, coord_t const x, coord_t const y
             ) const;
             index_t get_load() const;
+            bool check_load() const;
+            bool check_mbbs() const;
     };
 }
