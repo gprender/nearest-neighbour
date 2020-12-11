@@ -4,7 +4,7 @@
 
 #include "quadtree.hpp"
 
-int const MAX_LEAF_SIZE = 8;
+int const LEAF_CAPACITY = 64;
 
 using coord_t = spatial::coord_t;
 using code_t = spatial::code_t;
@@ -12,83 +12,74 @@ using index_t = spatial::index_t;
 
 template<typename T>
 spatial::Quadtree<T>::Quadtree(coord_t x0, coord_t x1, coord_t y0, coord_t y1):
-    root(new Node(NULL, 0, 0, (Rectangle){x0, x1, y0, y1})) {}
+    root(std::make_unique<Node>(0, 0, (Rectangle){x0, x1, y0, y1}))
+{ }
 
 template<typename T>
-spatial::Quadtree<T>::~Quadtree() { recursive_deconstruct(root); }
+spatial::Quadtree<T>::~Quadtree() 
+{ }
 
 template<typename T>
-spatial::Quadtree<T>::Node::Node(Node* p, int d, code_t c, Rectangle b): 
-    depth(d), parent(p), code(c), bounds(b), center(midpoint(b)) {}
+spatial::Quadtree<T>::Node::Node(int d, code_t c, Rectangle b): 
+    depth(d), 
+    code(c), 
+    bounds(b), 
+    center(midpoint(b)) 
+{ }
 
 template<typename T>
-spatial::Range spatial::Quadtree<T>::build(std::vector<T> const raw_data) {
+spatial::Quadtree<T>::Node::~Node() 
+{ }
+
+template<typename T>
+spatial::Range spatial::Quadtree<T>::build(std::vector<T> const& raw_data) {
     std::vector<Datum<T>> formatted_data;
     for (auto const& raw_datum : raw_data) {
         Point const new_point = {raw_datum[0], raw_datum[1]};
         Datum<T> const new_datum = {raw_datum, new_point};
         formatted_data.push_back(new_datum);
     }
-    return recursive_build(root, formatted_data); 
+    return root->insert(*this, formatted_data);
 }
 
 template<typename T>
-spatial::Range spatial::Quadtree<T>::recursive_build(
-    Node* const node, std::vector<Datum<T>> data
+spatial::Range spatial::Quadtree<T>::Node::insert(
+    Quadtree<T>& tree, std::vector<Datum<T>> data
 ) {
-    if (data.size() <= MAX_LEAF_SIZE) {
+    if (data.size() <= LEAF_CAPACITY) {
         // Create a new leaf node
-        index_t const index = leaves.size();
-        node->leaf_range = {index, index};
-        leaves.push_back((Leaf){node, data}); 
-        return {index, index};
+        index_t const leaf_idx = tree.leaves.size();
+        this->leaf_range = {leaf_idx, leaf_idx};
+        tree.leaves.push_back(data); 
+        return {leaf_idx, leaf_idx};
     } else {
         // Partition the data into four quadrants
         std::array<std::vector<Datum<T>>, 4> partition;
         for (auto const& datum : data) {
-            int const quadrant = get_quadrant(node->center, datum.point);
+            int const quadrant = get_quadrant(datum.point);
             partition[quadrant].push_back(datum);
         }
         // Create 4 child-quadrants and recurse with the appropriate partition
-        node->create_children();
+        this->create_children();
 
         // The NW child will contain the leaf with the lowest Z-order code
-        Range child_leaf_range;
-        child_leaf_range = recursive_build(node->children[0], partition[0]);
-        node->leaf_range.start = child_leaf_range.start;
+        Range child_leaf_range = children[0]->insert(tree, partition[0]);
+        this->leaf_range.start = child_leaf_range.start;
 
         // The leaves in the NE and SW children all fall inside this range
-        recursive_build(node->children[1], partition[1]);
-        recursive_build(node->children[2], partition[2]);
+        children[1]->insert(tree, partition[1]);
+        children[2]->insert(tree, partition[2]);
 
         // The SE child will contain the leaf with the highest Z-order code
-        child_leaf_range = recursive_build(node->children[3], partition[3]);
-        node->leaf_range.end = child_leaf_range.end;
+        child_leaf_range = children[3]->insert(tree, partition[3]);
+        this->leaf_range.end = child_leaf_range.end;
 
-        return node->leaf_range;
+        return this->leaf_range;
     }
-}
-
-template<typename T>
-void spatial::Quadtree<T>::recursive_deconstruct(Node* const node) {
-    if (!node->is_leaf()) {
-        for (auto const& child : node->children) {
-            recursive_deconstruct(child);
-        }
-    }
-    delete node;
 }
 
 /**
- * Query the quadtree for the k-nearest neighbours of a query point.
- * We do this with a doubly-greedy approach. First, we keep track of a priority
- * queue of quadtree nodes (initialized with just the root), and repeatedly
- * expand the node closest to the query point. As we find leaf nodes, we fill
- * up a second priority queue containing the nearest neighbours so far. Once
- * we have k points, and our "worst" nearest neighbour is closer than the next 
- * closest node, we terminate the search and return the k-nearest neighbours.
- * 
- * This function is pretty heavy as-is, and should probably be split up
+ * k-nearest neighbour query using our distance browsing algorithm
  */
 template<typename T>
 std::vector<T> spatial::Quadtree<T>::query_knn(
@@ -96,56 +87,33 @@ std::vector<T> spatial::Quadtree<T>::query_knn(
 ) const {
     Point const query_point = {x, y};
 
-    // Set up the node priority queue
-    auto const node_cmp = [](NodePQE const a, NodePQE const b) {
-        return (a.dist > b.dist);
-    };
-    std::priority_queue<NodePQE, std::vector<NodePQE>, decltype(node_cmp)> 
-        node_pq(node_cmp);
-    node_pq.push((NodePQE){root, distance(query_point, root->bounds)});
+    NodePQ node_pq(query_point);
+    node_pq.push(root.get());
+    DatumPQ datum_pq(query_point);
 
-    // Set up the datum priority queue
-    auto const datum_cmp = [](DatumPQE const& a, DatumPQE const& b) {
-        return (a.dist < b.dist);
-    };
-    std::priority_queue<DatumPQE, std::vector<DatumPQE>, decltype(datum_cmp)> 
-        datum_pq(datum_cmp);
-
-    // Search the quadtree
-    while (datum_pq.size() < k
-           || datum_pq.top().dist > node_pq.top().dist) {
-        NodePQE const npqe = node_pq.top();
-        node_pq.pop();
-
-        if (npqe.node->is_leaf()) {
-            // Examine the points in the leaf
-            index_t const leaf_index = npqe.node->leaf_range.start;
-            for (auto const& datum : leaves[leaf_index].bucket) {
-                coord_t const new_dist = distance(query_point, datum.point);
-                // We have fewer than k points: take the new point
+    while (
+        datum_pq.size() < k
+        || datum_pq.peek().dist > node_pq.peek().dist
+    ) {
+        Node* next_node = node_pq.pop().node;
+        if (next_node->is_leaf()) {
+            for (auto const& datum : leaves[next_node->leaf_range.start]) {
                 if (datum_pq.size() < k) {
-                    datum_pq.push((DatumPQE){datum, new_dist});
+                    datum_pq.push(datum);
                 }
-                // The new point is better than our worst point: replace it
-                else if (datum_pq.top().dist > new_dist) {
-                    datum_pq.pop();
-                    datum_pq.push((DatumPQE){datum, new_dist});
+                else {
+                    datum_pq.choose(datum);
                 }
             }
         } else {
-            // Expand the node, adding its children to the priority queue
-            for (auto const& child : npqe.node->children) {
-                coord_t const dist = distance(query_point, child->bounds);
-                node_pq.push((NodePQE){child, dist});
-            }
+            node_pq.expand(next_node);
         }
-    }
+    } 
+
     std::vector<T> query_bucket;
     query_bucket.reserve(k);
     while (!datum_pq.empty()) {
-        DatumPQE e = datum_pq.top();
-        query_bucket.push_back(e.datum.data);
-        datum_pq.pop();
+        query_bucket.push_back(datum_pq.pop().datum.data);
     }
     return query_bucket;
 }
@@ -156,8 +124,8 @@ std::vector<T> spatial::Quadtree<T>::query_knn(
  * this is just converting from geographic coordinates to Z-ordering.
  */
 template<typename T>
-int spatial::Quadtree<T>::get_quadrant(Point origin, Point p) const {
-    return ((p.x > origin.x) + ((p.y < origin.y) << 1));
+int spatial::Quadtree<T>::Node::get_quadrant(Point const p) const {
+    return ((p.x > center.x) + ((p.y < center.y) << 1));
 }
 
 template<typename T>
@@ -177,20 +145,20 @@ bool spatial::Quadtree<T>::depth_equals(unsigned const k) const {
 
 template<typename T>
 void spatial::Quadtree<T>::Node::create_children() {
-    Rectangle NW_bounds = {bounds.xmin, center.x, center.y, bounds.ymax};
-    children[0] = new Node(this, depth+1, (code << 2) + 0, NW_bounds);
+    Rectangle const NW_bounds = {bounds.xmin, center.x, center.y, bounds.ymax};
+    children[0] = std::make_unique<Node>(depth+1, (code << 2) + 0, NW_bounds);
 
-    Rectangle NE_bounds = {center.x, bounds.xmax, center.y, bounds.ymax};
-    children[1] = new Node(this, depth+1, (code << 2) + 1, NE_bounds);
+    Rectangle const NE_bounds = {center.x, bounds.xmax, center.y, bounds.ymax};
+    children[1] = std::make_unique<Node>(depth+1, (code << 2) + 1, NE_bounds);
 
-    Rectangle SW_bounds = {bounds.xmin, center.x, bounds.ymin, center.y};
-    children[2] = new Node(this, depth+1, (code << 2) + 2, SW_bounds);
+    Rectangle const SW_bounds = {bounds.xmin, center.x, bounds.ymin, center.y};
+    children[2] = std::make_unique<Node>(depth+1, (code << 2) + 2, SW_bounds);
     
-    Rectangle SE_bounds = {center.x, bounds.xmax, bounds.ymin, center.y};
-    children[3] = new Node(this, depth+1, (code << 2) + 3, SE_bounds);
+    Rectangle const SE_bounds = {center.x, bounds.xmax, bounds.ymin, center.y};
+    children[3] = std::make_unique<Node>(depth+1, (code << 2) + 3, SE_bounds);
 }
 
 template<typename T>
-bool spatial::Quadtree<T>::Node::is_leaf() { 
+bool spatial::Quadtree<T>::Node::is_leaf() const { 
     return (leaf_range.start == leaf_range.end);
 }
