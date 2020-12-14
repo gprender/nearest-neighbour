@@ -4,15 +4,26 @@
 
 #include "quadtree.hpp"
 
+/**
+ * These two constants are mutually exclusive:
+ *  LEAF_CAPACITY is used for insert-based construction
+ *  TARGET_DEPTH is used for bulk loading
+ */
 int const LEAF_CAPACITY = 64;
+int const TARGET_DEPTH = 8;
 
 using coord_t = spatial::coord_t;
 using code_t = spatial::code_t;
 using index_t = spatial::index_t;
 
+/**
+ * We nudge the maximum bounds of the quadtree by a tiny amount to fix a
+ * rare edge case in zorder_hash() where a point is right on the boundary.
+ * (a point on the boundary results in a Z-order code outside of the tree)
+ */
 template<typename T>
 spatial::Quadtree<T>::Quadtree(coord_t x0, coord_t x1, coord_t y0, coord_t y1):
-    root(std::make_unique<Node>(0, 0, (Rectangle){x0, x1, y0, y1}))
+    root(std::make_unique<Node>(0, 0, (Rectangle){x0, x1+0.01, y0, y1+0.01}))
 { }
 
 template<typename T>
@@ -31,17 +42,35 @@ template<typename T>
 spatial::Quadtree<T>::Node::~Node() 
 { }
 
+/**
+ * Now that we have two methods with which to build the quadtree,
+ * we'll use build() as an alias for bulk load, for compatibiliy's sake
+ */
 template<typename T>
-spatial::Range spatial::Quadtree<T>::build(std::vector<T> const& raw_data) {
-    std::vector<Datum<T>> formatted_data;
-    for (auto const& raw_datum : raw_data) {
-        Point const new_point = {raw_datum[0], raw_datum[1]};
-        Datum<T> const new_datum = {raw_datum, new_point};
-        formatted_data.push_back(new_datum);
-    }
-    return root->insert(*this, formatted_data);
+void spatial::Quadtree<T>::build(std::vector<T> const& raw_data) {
+    _bulk_load(datumize(raw_data));
 }
 
+/**
+ * Build the quadtree top-down by recursively partitioning the data.
+ */
+template<typename T>
+void spatial::Quadtree<T>::insert(std::vector<T> const& raw_data) {
+    root->insert(datumize<T>(raw_data));
+}
+
+/**
+ * Build the quadtree with a sort-then-build approach.
+ * This is generally more efficient for larger datasets
+ */
+template<typename T>
+void spatial::Quadtree<T>::bulk_load(std::vector<T> const& raw_data) {
+    _bulk_load(datumize<T>(raw_data));
+}
+
+/**
+ * Recursively insert a collection of data into the quadtree.
+ */
 template<typename T>
 spatial::Range spatial::Quadtree<T>::Node::insert(
     Quadtree<T>& tree, std::vector<Datum<T>> data
@@ -76,6 +105,26 @@ spatial::Range spatial::Quadtree<T>::Node::insert(
 
         return this->leaf_range;
     }
+}
+
+/**
+ * Sort the data by Z-order code, then build the tree around the data.
+ */
+template<typename T>
+bool spatial::Quadtree<T>::_bulk_load(std::vector<Datum<T>> const& data) {
+    // Bin each of the data into the appropriate leaf
+    leaves.resize(std::pow(4, TARGET_DEPTH));
+    for (auto const& datum : data) {
+        code_t zorder_code = zorder_hash(datum.point, TARGET_DEPTH);
+        leaves[zorder_code].push_back(datum);
+    }
+
+    // Build up the tree of pointers
+    root->populate(
+        (Range){0, (index_t)std::pow(4,TARGET_DEPTH)-1}, TARGET_DEPTH
+    );
+
+    return true;
 }
 
 /**
@@ -125,7 +174,25 @@ std::vector<T> spatial::Quadtree<T>::query_knn(
  */
 template<typename T>
 int spatial::Quadtree<T>::Node::get_quadrant(Point const p) const {
-    return ((p.x > center.x) + ((p.y < center.y) << 1));
+    return ((p.x > center.x) + ((p.y > center.y) << 1));
+}
+
+/**
+ * Calculate the Z-order code of a point to the specified depth.
+ * This function is dependent on the bounds of the quadtree's root
+ */
+template<typename T>
+code_t spatial::Quadtree<T>::zorder_hash(Point const p, int const depth) const {
+    // std::cout << "We hashing [" << p.x << ", " << p.y << "]\n";
+
+    int cell_xidx = grid_index(
+        p.x, root->bounds.xmin, root->bounds.xmax, std::pow(2, depth)
+    );
+    int cell_yidx = grid_index(
+        p.y, root->bounds.ymin, root->bounds.ymax, std::pow(2, depth)
+    );
+
+    return interleave(cell_xidx, cell_yidx);
 }
 
 template<typename T>
@@ -145,17 +212,39 @@ bool spatial::Quadtree<T>::depth_equals(unsigned const k) const {
 
 template<typename T>
 void spatial::Quadtree<T>::Node::create_children() {
+    Rectangle const SW_bounds = {bounds.xmin, center.x, bounds.ymin, center.y};
+    children[0] = std::make_unique<Node>(depth+1, (code << 2) + 0, SW_bounds);
+
+    Rectangle const SE_bounds = {center.x, bounds.xmax, bounds.ymin, center.y};
+    children[1] = std::make_unique<Node>(depth+1, (code << 2) + 1, SE_bounds);
+
     Rectangle const NW_bounds = {bounds.xmin, center.x, center.y, bounds.ymax};
-    children[0] = std::make_unique<Node>(depth+1, (code << 2) + 0, NW_bounds);
+    children[2] = std::make_unique<Node>(depth+1, (code << 2) + 2, NW_bounds);
 
     Rectangle const NE_bounds = {center.x, bounds.xmax, center.y, bounds.ymax};
-    children[1] = std::make_unique<Node>(depth+1, (code << 2) + 1, NE_bounds);
+    children[3] = std::make_unique<Node>(depth+1, (code << 2) + 3, NE_bounds);
+}
 
-    Rectangle const SW_bounds = {bounds.xmin, center.x, bounds.ymin, center.y};
-    children[2] = std::make_unique<Node>(depth+1, (code << 2) + 2, SW_bounds);
-    
-    Rectangle const SE_bounds = {center.x, bounds.xmax, bounds.ymin, center.y};
-    children[3] = std::make_unique<Node>(depth+1, (code << 2) + 3, SE_bounds);
+/**
+ * Recursively populate the tree with pointers from the current node downwards.
+ * This is the "build the tree" step of the bulk loading process
+ */
+template<typename T>
+void spatial::Quadtree<T>::Node::populate(
+    Range const idx_range, int const depth
+) {
+    this->leaf_range = idx_range;
+    if (depth > 0) {
+        create_children();
+        index_t step = ((idx_range.end+1) - idx_range.start) / 4;
+        for (int i=0; i<4; i++) {
+            Range const child_range = {
+                idx_range.start + (step*i),
+                idx_range.start + (step*(i+1)) - 1
+            };
+            children[i]->populate(child_range, depth-1);
+        }
+    }
 }
 
 template<typename T>
