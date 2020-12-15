@@ -88,6 +88,10 @@ namespace spatial {
         );
     }
 
+    void print_range(Range const r) {
+        std::cout << "[ " << r.start << ", " << r.end << " ]\n";
+    }
+
     void print_rect(Rectangle const rect) {
         std::cout << std::fixed << std::setprecision(2) 
                   << "x[" << rect.xmin << ", " << rect.xmax << "]  ";
@@ -105,5 +109,61 @@ namespace spatial {
         T data;
         Point point;
     };
+
+    /**
+     * Build a vector of Datum<T> from a vector of <T>.
+     */
+    template<typename T>
+    std::vector<Datum<T>> datumize(std::vector<T> const& raw_data) {
+        std::vector<Datum<T>> formatted_data;
+        formatted_data.reserve(raw_data.size());
+        for (auto const& raw_datum : raw_data) {
+            Point const new_point = {raw_datum[0], raw_datum[1]};
+            Datum<T> const new_datum = {raw_datum, new_point};
+            formatted_data.push_back(new_datum);
+        }
+        return formatted_data;
+    }
+
+    /**
+     * For a 1d range [min,max] divided into 'dim' equal partitions, 
+     * find the partition (or index) which contains 'coord'.
+     */
+    int grid_index(
+        coord_t const coord, 
+        coord_t const min, 
+        coord_t const max, 
+        int const dim
+    ) {
+        return (coord - min) * dim / (max - min);
+    }
+
+    // Bitstring constants for use in interleaving integers
+    uint8_t const _shifts[] = { 1, 2, 4, 8 };
+    uint32_t const _masks[] = { 
+        0x55555555, 
+        0x33333333, 
+        0x0F0F0F0F, 
+        0x00FF00FF 
+    };
+
+    /**
+     * Space 16-bits out into 32-bits, with zeros inbetween.
+     * e.g., 1111 -> 01010101
+     */
+    uint32_t space_bits(uint16_t const i0) {
+        uint32_t i = (i0 | (i0 << _shifts[3])) & _masks[3];
+        i = (i | (i << _shifts[2])) & _masks[2];
+        i = (i | (i << _shifts[1])) & _masks[1];
+        return (i | (i << _shifts[0])) & _masks[0];
+    }
+    
+    /**
+     * Interleave two 16-bit integers into a 32-bit integer.
+     * e.g., (ABCD, EFGH) -> EAFB GCHD
+     */
+    uint32_t interleave(uint16_t const a, uint16_t const b) {
+        return space_bits(a) | (space_bits(b) << 1);
+    }
 
 }

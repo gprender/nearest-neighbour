@@ -29,6 +29,7 @@ namespace spatial {
                         Quadtree<T>& tree, 
                         std::vector<Datum<T>> data
                     );
+                    void populate(Range const idx_range, int const depth);
                     int get_quadrant(Point const p) const;
                     void create_children();
                     bool is_leaf() const;
@@ -130,28 +131,23 @@ namespace spatial {
                     bool empty() { return (pq.empty()); }
             };
 
-            struct Leaf { std::vector<Datum<T>> bucket; };
-
-            // Node Priority Queue Element
-            struct NodePQE {
-                std::unique_ptr<Node> node;
-                coord_t dist;
-            };
-
-            // Datum Priority Queue Element
-            // Datum can be space-intensive, should use a pointer here instead
-            struct DatumPQE {
+            struct ZPair {
                 Datum<T> datum;
-                coord_t dist;
+                code_t code;
             };
             
             std::unique_ptr<Node> root;
             std::vector<std::vector<Datum<T>>> leaves;
 
+            bool _bulk_load(std::vector<Datum<T>> const& data);
+            code_t zorder_hash(Point const p, int const depth) const;
+
         public:
             Quadtree(coord_t x0, coord_t x1, coord_t y0, coord_t y1);
             ~Quadtree();
-            Range build(std::vector<T> const& raw_data);
+            void build(std::vector<T> const& raw_data);
+            void insert(std::vector<T> const& raw_data);
+            void bulk_load(std::vector<T> const& raw_data);
             std::vector<T> query_knn(
                 unsigned const k, coord_t const x, coord_t const y
             ) const;
