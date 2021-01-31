@@ -9,9 +9,10 @@
 #include <iomanip>
 #include <chrono>
 
-#include "../data_structures/quadtree.cpp"
-#include "../data_structures/rtree.cpp"
-#include "lidar_reader.cpp"
+#include "../src/quadtree.cpp"
+#include "../src/rtree.cpp"
+#include "../src/zgrid.cpp"
+#include "../scripts/lidar_reader.cpp"
 
 using coord_t = spatial::coord_t;
 
@@ -91,11 +92,51 @@ void rtree_benchmark(std::string data_file, std::string query_file) {
     std::cout << "\n";
 }
 
+void zgrid_benchmark(std::string data_file, std::string query_file) {
+    std::cout << "\nRunning Z-grid timing benchmark for \'" << data_file << "\',\n"
+              << "using " << query_file << " for query points.\n";
+
+    LidarReader data_reader(data_file);
+    auto const& min = data_reader.get_min();
+    auto const& max = data_reader.get_max();
+
+    spatial::Zgrid<std::vector<double>> zgrid(
+        min[0], max[0], min[1], max[1]
+    );
+
+    std::cout << "\tBuilding the Z-grid... ";
+    auto start = std::chrono::system_clock::now();
+    zgrid.build(data_reader.get_point_data(), 7);
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>
+        (end - start).count();
+    std::cout << elapsed << " milliseconds\n";
+
+    LidarReader query_reader(query_file);
+    std::cout << "\tQuerying k-nearest neighbours x1000...\n";
+    for (auto const k : {1, 8, 32}) {
+        std::cout << "\t\tk=" << k << ":\t";
+        coord_t filler = 0;
+        start = std::chrono::system_clock::now();
+        for (auto const& p : query_reader.get_point_data()) {
+            auto const knn = zgrid.query_knn(k, p[0], p[1]);
+            filler += knn[0][2];
+        }
+        end = std::chrono::system_clock::now();
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>
+            (end - start).count();
+        std::cout << elapsed << " milliseconds";
+        std::cout << "  \t(filler: " << filler << ")\n";
+    }
+    std::cout << "\n";
+}
+
 int main(int argc, char** argv) {
 
     for (int i=1; i<argc; i+=2) {
         quadtree_benchmark(argv[i], argv[i+1]);
         rtree_benchmark(argv[i], argv[i+1]);
+        zgrid_benchmark(argv[i], argv[i+1]);
     }
 
     return 0;

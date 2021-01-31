@@ -12,9 +12,10 @@
 #include "windows.h"
 #include "psapi.h"
 
-#include "../data_structures/quadtree.cpp"
-#include "../data_structures/rtree.cpp"
-#include "lidar_reader.cpp"
+#include "../src/quadtree.cpp"
+#include "../src/rtree.cpp"
+#include "../src/zgrid.cpp"
+#include "../scripts/lidar_reader.cpp"
 
 using coord_t = spatial::coord_t;
 
@@ -65,11 +66,34 @@ void rtree_benchmark(std::string filename) {
     std::cout << process_memusage() - mem_baseline << " bytes used\n";
 }
 
+void zgrid_benchmark(std::string const filename) {
+    std::cout << "\nRunning z-grid memory benchmark for \'" 
+              << filename << "\':\n";
+
+    // Parsing the data & header
+    LidarReader reader(filename);
+    auto const& min = reader.get_min();
+    auto const& max = reader.get_max();
+
+    // Record a memory baseline here
+    // The space usage of reading the data isn't relevant 
+    auto mem_baseline = process_memusage();
+
+    spatial::Zgrid<std::vector<coord_t>> zgrid(
+        min[0], max[0], min[1], max[1]
+    );
+
+    std::cout << "\tBuilding the Z-grid...   \t";
+    zgrid.build(reader.get_point_data(), 7);
+    std::cout << process_memusage() - mem_baseline << " bytes used\n";
+}
+
 int main(int argc, char** argv) {
 
     for (int i=1; i<argc; i++) {
         quadtree_benchmark(argv[i]);
         rtree_benchmark(argv[i]);
+        zgrid_benchmark(argv[i]);
     }
 
     return 0;

@@ -14,9 +14,10 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
-#include "../data_structures/quadtree.cpp"
-#include "../data_structures/rtree.cpp"
-#include "lidar_reader.cpp"
+#include "../src/quadtree.cpp"
+#include "../src/rtree.cpp"
+#include "../src/zgrid.cpp"
+#include "../scripts/lidar_reader.cpp"
 
 /**
  * reg2048.txt is artificially generated in a 16x16 grid,
@@ -112,8 +113,8 @@ TEST_CASE("Make sure all this quadtree code actually works", "[quadtree]") {
         );
         qt.build(point_data);
 
+        // Assumes the leaf capacity is 16
         REQUIRE(qt.num_leaves() == (16*16));
-        REQUIRE(qt.depth_equals(4));
     }
 
     SECTION("k-nearest neighbour querying") {
@@ -184,4 +185,41 @@ TEST_CASE("R-tree correctness testing!", "R-tree") {
         REQUIRE(check_knn(knnSE, {500, 500}, point_data));
         REQUIRE(check_knn(knnXX, {250, 750}, point_data));
     }
+}
+
+TEST_CASE("Z-grid correctness testing", "Z-grid") {
+
+    LidarReader reader(rand100k);
+    auto const& min = reader.get_min();
+    auto const& max = reader.get_max();
+    auto const& point_data = reader.get_point_data();
+
+    spatial::Zgrid<std::vector<coord_t>> zgrid(
+            min[0], max[0], min[1], max[1]
+        );
+    zgrid.build(point_data, 6);
+
+    SECTION("querying") {
+        auto const knn1 = zgrid.query_knn(1, 100, 150);
+        auto const knn16 = zgrid.query_knn(16, 300, 450);
+        auto const knn32 = zgrid.query_knn(32, 250, 250);
+        auto const knnNW = zgrid.query_knn(8, 0, 0);
+        auto const knnSE = zgrid.query_knn(8, 500, 500);
+        auto const knnXX = zgrid.query_knn(16, 250, 750);
+
+        REQUIRE(check_ordering(knn1, {100, 150}));
+        REQUIRE(check_ordering(knn16, {300, 450}));
+        REQUIRE(check_ordering(knn32, {250, 250}));
+        REQUIRE(check_ordering(knnNW, {0, 0}));
+        REQUIRE(check_ordering(knnSE, {500, 500}));
+        REQUIRE(check_ordering(knnXX, {250, 750}));
+
+        REQUIRE(check_knn(knn1, {100, 150}, point_data));
+        REQUIRE(check_knn(knn16, {300, 450}, point_data));
+        REQUIRE(check_knn(knn32, {250, 250}, point_data));
+        REQUIRE(check_knn(knnNW, {0, 0}, point_data));
+        REQUIRE(check_knn(knnSE, {500, 500}, point_data));
+        REQUIRE(check_knn(knnXX, {250, 750}, point_data));
+    }
+
 }
